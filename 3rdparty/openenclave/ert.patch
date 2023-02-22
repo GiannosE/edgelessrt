@@ -180,6 +180,43 @@ index ca0e0f893..ea04aa53b 100644
              for j in range(i):
                  gdbcmd += Out[j][0] + " " + Out[j][1] + " " + '%(Location)#08x' % {'Location' : int(Out[j][2])} + " " + Out[j][3]
          else:
+diff --git a/enclave/core/hostcalls.c b/enclave/core/hostcalls.c
+index fda004aa3..75565cbf8 100644
+--- a/enclave/core/hostcalls.c
++++ b/enclave/core/hostcalls.c
+@@ -103,6 +103,32 @@ void* oe_host_realloc(void* ptr, size_t size)
+     return retval;
+ }
+
++oe_result_t _oe_memalign_ocall(void** retval, size_t alignment, size_t size)
++{
++    OE_UNUSED(retval);
++    OE_UNUSED(alignment);
++    OE_UNUSED(size);
++    return OE_UNEXPECTED;
++}
++
++OE_WEAK_ALIAS(_oe_memalign_ocall, oe_memalign_ocall);
++
++void* oe_host_memalign(size_t alignment, size_t size)
++{
++    void* retval = NULL;
++
++    if (oe_memalign_ocall(&retval, alignment, size) != OE_OK)
++        return NULL;
++
++    if (retval && !oe_is_outside_enclave(retval, size))
++    {
++        oe_assert("oe_host_memalign_ocall() returned non-host memory" == NULL);
++        oe_abort();
++    }
++
++    return retval;
++}
++
+ void oe_host_free(void* ptr)
+ {
+     oe_ocall(OE_OCALL_FREE, (uint64_t)ptr, NULL);
 diff --git a/enclave/core/init_fini.c b/enclave/core/init_fini.c
 index 47bfc0d10..1ea5f124e 100644
 --- a/enclave/core/init_fini.c
@@ -599,6 +636,19 @@ index e3255a942..77351b2ac 100644
  
      if (!(fds = calloc(nfds, sizeof(struct oe_pollfd))))
      {
+diff --git a/host/ocalls/memory.c b/host/ocalls/memory.c
+index 249c910e3..0ad876b05 100644
+--- a/host/ocalls/memory.c
++++ b/host/ocalls/memory.c
+@@ -7,3 +7,8 @@ void* oe_realloc_ocall(void* ptr, size_t size)
+ {
+     return realloc(ptr, size);
+ }
++
++void* oe_memalign_ocall(size_t alignment, size_t size)
++{
++    return aligned_alloc(alignment, size);
++}
 diff --git a/host/sgx/calls.c b/host/sgx/calls.c
 index eed0c4dcf..fb791663e 100644
 --- a/host/sgx/calls.c
@@ -1178,7 +1228,7 @@ index 5eb12b6e9..40087c299 100644
  
  typedef struct oe_sgx_enclave_config_t
 diff --git a/include/openenclave/edl/fcntl.edl b/include/openenclave/edl/fcntl.edl
-index 5a28f71af..0547d3100 100644
+index 5a28f71af..06deff621 100644
 --- a/include/openenclave/edl/fcntl.edl
 +++ b/include/openenclave/edl/fcntl.edl
 @@ -56,7 +56,8 @@ enclave
@@ -1191,6 +1241,23 @@ index 5a28f71af..0547d3100 100644
              propagate_errno;
  
          ssize_t oe_syscall_read_ocall(
+@@ -93,14 +94,14 @@ enclave
+
+         ssize_t oe_syscall_pread_ocall(
+             oe_host_fd_t fd,
+-            [out, size=count] void* buf,
++            [user_check] void* buf,
+             size_t count,
+             oe_off_t offset)
+             propagate_errno;
+
+         ssize_t oe_syscall_pwrite_ocall(
+             oe_host_fd_t fd,
+-            [in, size=count] const void* buf,
++            [user_check] const void* buf,
+             size_t count,
+             oe_off_t offset)
+             propagate_errno;
 @@ -198,5 +199,29 @@ enclave
              uint64_t argsize,
              [in,out,size=argsize] void* argout)
@@ -1219,6 +1286,19 @@ index 5a28f71af..0547d3100 100644
 +            size_t new_region)
 +            propagate_errno;
 +*/
+     };
+ };
+diff --git a/include/openenclave/edl/memory.edl b/include/openenclave/edl/memory.edl
+index 48bfffd4c..f01d49107 100644
+--- a/include/openenclave/edl/memory.edl
++++ b/include/openenclave/edl/memory.edl
+@@ -19,5 +19,8 @@ enclave
+         void* oe_realloc_ocall(
+             [user_check] void* ptr,
+             size_t size);
++        void* oe_memalign_ocall(
++            size_t alignment,
++            size_t size);
      };
  };
 diff --git a/include/openenclave/edl/sgx/debug.edl b/include/openenclave/edl/sgx/debug.edl
@@ -1281,6 +1361,33 @@ index 38f075434..7b7a083f7 100644
 +            propagate_errno;
 +    };
  };
+diff --git a/include/openenclave/enclave.h b/include/openenclave/enclave.h
+index f387c3b7a..98e2a11c9 100644
+--- a/include/openenclave/enclave.h
++++ b/include/openenclave/enclave.h
+@@ -179,6 +179,22 @@ void* oe_host_realloc(void* ptr, size_t size);
+  */
+ void* oe_host_calloc(size_t nmemb, size_t size);
+
++/**
++ * Allocate an aligned buffer from the host's heap.
++ *
++ * This function allocates **size** bytes from the host's heap, aligned as
++ * required. It returns the address of the allocated memory. The
++ * implementation performs an OCALL to the host, which calls aligned_alloc().
++ * To free the memory, it must be passed to oe_host_free().
++ *
++ * @param[in] alignment The alignment requirement for the memory returned.
++ * @param[in] size The size to be allocated from host memory.
++ *
++ * @returns The allocated memory or NULL if unable to allocate the memory.
++ *
++ */
++void* oe_host_memalign(size_t alignment, size_t size);
++
+ /**
+  * Release allocated memory.
+  *
 diff --git a/include/openenclave/host.h b/include/openenclave/host.h
 index d0f279ec5..cf32117c2 100644
 --- a/include/openenclave/host.h
