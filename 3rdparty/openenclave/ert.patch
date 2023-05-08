@@ -181,10 +181,10 @@ index ca0e0f893..ea04aa53b 100644
                  gdbcmd += Out[j][0] + " " + Out[j][1] + " " + '%(Location)#08x' % {'Location' : int(Out[j][2])} + " " + Out[j][3]
          else:
 diff --git a/enclave/core/hostcalls.c b/enclave/core/hostcalls.c
-index fda004aa3..75565cbf8 100644
+index fda004aa3..9a12f34c5 100644
 --- a/enclave/core/hostcalls.c
 +++ b/enclave/core/hostcalls.c
-@@ -103,6 +103,32 @@ void* oe_host_realloc(void* ptr, size_t size)
+@@ -103,6 +103,63 @@ void* oe_host_realloc(void* ptr, size_t size)
      return retval;
  }
 
@@ -208,6 +208,37 @@ index fda004aa3..75565cbf8 100644
 +    if (retval && !oe_is_outside_enclave(retval, size))
 +    {
 +        oe_assert("oe_host_memalign_ocall() returned non-host memory" == NULL);
++        oe_abort();
++    }
++
++    return retval;
++}
++
++oe_result_t _oe_mmap_ocall(void** retval, void* addr, size_t length, int prot, int mmap_flags, oe_off_t offset, char* filename, int open_flags)
++{
++    OE_UNUSED(retval);
++    OE_UNUSED(addr);
++    OE_UNUSED(length);
++    OE_UNUSED(prot);
++    OE_UNUSED(mmap_flags);
++    OE_UNUSED(offset);
++    OE_UNUSED(filename);
++    OE_UNUSED(open_flags);
++    return OE_UNEXPECTED;
++}
++
++OE_WEAK_ALIAS(_oe_mmap_ocall, oe_mmap_ocall);
++
++void* oe_host_mmap(void* addr, size_t length, int prot, int mmap_flags, oe_off_t offset, char* filename, int open_flags)
++{
++    void* retval = NULL;
++
++    if (oe_mmap_ocall(&retval, addr, length, prot, mmap_flags, offset, filename, open_flags) != OE_OK)
++        return NULL;
++
++    if (retval && !oe_is_outside_enclave(retval, length))
++    {
++        oe_assert("oe_mmap_ocall() returned non-host memory" == NULL);
 +        oe_abort();
 +    }
 +
@@ -637,10 +668,18 @@ index e3255a942..77351b2ac 100644
      if (!(fds = calloc(nfds, sizeof(struct oe_pollfd))))
      {
 diff --git a/host/ocalls/memory.c b/host/ocalls/memory.c
-index 249c910e3..0ad876b05 100644
+index 249c910e3..cc5b84094 100644
 --- a/host/ocalls/memory.c
 +++ b/host/ocalls/memory.c
-@@ -7,3 +7,8 @@ void* oe_realloc_ocall(void* ptr, size_t size)
+@@ -1,9 +1,27 @@
+ // Copyright (c) Open Enclave SDK contributors.
+ // Licensed under the MIT License.
+-
++#include <sys/mman.h>
++#include <fcntl.h>
+ #include "core_u.h"
+
+ void* oe_realloc_ocall(void* ptr, size_t size)
  {
      return realloc(ptr, size);
  }
@@ -648,6 +687,18 @@ index 249c910e3..0ad876b05 100644
 +void* oe_memalign_ocall(size_t alignment, size_t size)
 +{
 +    return aligned_alloc(alignment, size);
++}
++
++void* oe_mmap_ocall(void *addr, size_t length, int prot, int mmap_flags, off_t offset, char *filename, int open_flags)
++{
++  printf("filename %s \n", filename);
++  int fd = open(filename, open_flags);
++  if (fd == -1)
++    perror("open failed in oe_mmap_ocall");
++  void * ret = mmap(addr, length, prot, mmap_flags, fd, offset);
++  if (ret == MAP_FAILED)
++    perror("mmap failed in oe_mmap_ocall");
++  return ret;
 +}
 diff --git a/host/sgx/calls.c b/host/sgx/calls.c
 index eed0c4dcf..fb791663e 100644
@@ -1228,7 +1279,7 @@ index 5eb12b6e9..40087c299 100644
  
  typedef struct oe_sgx_enclave_config_t
 diff --git a/include/openenclave/edl/fcntl.edl b/include/openenclave/edl/fcntl.edl
-index 5a28f71af..06deff621 100644
+index 5a28f71af..c671ec24b 100644
 --- a/include/openenclave/edl/fcntl.edl
 +++ b/include/openenclave/edl/fcntl.edl
 @@ -56,7 +56,8 @@ enclave
@@ -1241,7 +1292,17 @@ index 5a28f71af..06deff621 100644
              propagate_errno;
  
          ssize_t oe_syscall_read_ocall(
-@@ -93,14 +94,14 @@ enclave
+@@ -67,7 +68,8 @@ enclave
+
+         ssize_t oe_syscall_write_ocall(
+             oe_host_fd_t fd,
+-            [in, size=count] const void* buf,
++            /*[in, size=count] const void* buf,*/
++            [user_check] const void* buf,
+             size_t count)
+             propagate_errno;
+
+@@ -93,14 +95,14 @@ enclave
 
          ssize_t oe_syscall_pread_ocall(
              oe_host_fd_t fd,
@@ -1258,7 +1319,7 @@ index 5a28f71af..06deff621 100644
              size_t count,
              oe_off_t offset)
              propagate_errno;
-@@ -198,5 +199,29 @@ enclave
+@@ -198,5 +200,29 @@ enclave
              uint64_t argsize,
              [in,out,size=argsize] void* argout)
              propagate_errno;
@@ -1289,16 +1350,31 @@ index 5a28f71af..06deff621 100644
      };
  };
 diff --git a/include/openenclave/edl/memory.edl b/include/openenclave/edl/memory.edl
-index 48bfffd4c..f01d49107 100644
+index 48bfffd4c..fcfdae169 100644
 --- a/include/openenclave/edl/memory.edl
 +++ b/include/openenclave/edl/memory.edl
-@@ -19,5 +19,8 @@ enclave
+@@ -14,10 +14,23 @@
+
+ enclave
+ {
++    include "openenclave/corelibc/bits/types.h"
++    include "openenclave/bits/edl/syscall_types.h"
+     untrusted
+     {
          void* oe_realloc_ocall(
              [user_check] void* ptr,
              size_t size);
 +        void* oe_memalign_ocall(
 +            size_t alignment,
 +            size_t size);
++        void* oe_mmap_ocall(
++            void* addr,
++            size_t length,
++            int prot,
++            int mmap_flags,
++            oe_off_t offset,
++            [string, in] char* filename,
++            int open_flags);
      };
  };
 diff --git a/include/openenclave/edl/sgx/debug.edl b/include/openenclave/edl/sgx/debug.edl
@@ -1362,10 +1438,18 @@ index 38f075434..7b7a083f7 100644
 +    };
  };
 diff --git a/include/openenclave/enclave.h b/include/openenclave/enclave.h
-index f387c3b7a..98e2a11c9 100644
+index f387c3b7a..3e2040a71 100644
 --- a/include/openenclave/enclave.h
 +++ b/include/openenclave/enclave.h
-@@ -179,6 +179,22 @@ void* oe_host_realloc(void* ptr, size_t size);
+@@ -15,6 +15,7 @@
+ #endif
+
+ #include <openenclave/bits/asym_keys.h>
++#include <openenclave/corelibc/bits/types.h>
+ #include "bits/defs.h"
+ #include "bits/evidence.h"
+ #include "bits/exception.h"
+@@ -179,6 +180,24 @@ void* oe_host_realloc(void* ptr, size_t size);
   */
  void* oe_host_calloc(size_t nmemb, size_t size);
 
@@ -1384,6 +1468,8 @@ index f387c3b7a..98e2a11c9 100644
 + *
 + */
 +void* oe_host_memalign(size_t alignment, size_t size);
++
++void* oe_host_mmap(void *addr, size_t length, int prot, int mmap_flags, oe_off_t offset, char* filename, int open_flags);
 +
  /**
   * Release allocated memory.
