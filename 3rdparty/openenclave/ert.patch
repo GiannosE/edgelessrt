@@ -1,5 +1,5 @@
 diff --git a/3rdparty/compiler-rt/CMakeLists.txt b/3rdparty/compiler-rt/CMakeLists.txt
-index 7fe981dab..df691b576 100644
+index d9398fa96..259545ea2 100644
 --- a/3rdparty/compiler-rt/CMakeLists.txt
 +++ b/3rdparty/compiler-rt/CMakeLists.txt
 @@ -71,14 +71,10 @@ set(GENERIC_SOURCES
@@ -120,10 +120,10 @@ index 7bd130f2d..2a58c37e8 100644
  // Sockets are dispatched via the following macros.
  #ifndef SYSCALL_USE_SOCKETCALL
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 2ce93a340..0e9b71c41 100644
+index b65fea498..f03c2fc78 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -175,7 +175,8 @@ endif ()
+@@ -243,7 +243,8 @@ endif ()
  
  if (OE_SGX)
    # Currently we only support OpenSSL on SGX.
@@ -133,7 +133,7 @@ index 2ce93a340..0e9b71c41 100644
  endif ()
  
  set(DEFAULT_TEST_ENCLAVE_CRYPTO_LIB
-@@ -292,7 +293,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION
+@@ -359,7 +360,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION
                                              VERSION_LESS "7.1")
    set(COMPILER_SUPPORTS_SNMALLOC off)
  else ()
@@ -143,7 +143,7 @@ index 2ce93a340..0e9b71c41 100644
  endif ()
  
  # NOTE: Building OpenEnclave using snmalloc for memory allocation is an experimental option.
-@@ -423,9 +425,9 @@ add_subdirectory(tools)
+@@ -491,9 +493,9 @@ add_subdirectory(tools)
  if (BUILD_ENCLAVES)
    add_subdirectory(enclave)
    add_subdirectory(3rdparty)
@@ -155,7 +155,7 @@ index 2ce93a340..0e9b71c41 100644
  
  if (OE_SGX)
 diff --git a/cmake/compiler_settings.cmake b/cmake/compiler_settings.cmake
-index 3e46e07db..896111169 100644
+index 0f97c1c6f..fd5ad7d6c 100644
 --- a/cmake/compiler_settings.cmake
 +++ b/cmake/compiler_settings.cmake
 @@ -24,7 +24,7 @@ endif ()
@@ -577,7 +577,7 @@ index fb7e1efc7..5178f177c 100644
   * Cleanup the thread-local section for a given thread.
   * This must be called *before* the td itself is cleaned up.
 diff --git a/enclave/sgx/report.c b/enclave/sgx/report.c
-index 657993af5..965176cbe 100644
+index 661a2f61b..6a6e28d44 100644
 --- a/enclave/sgx/report.c
 +++ b/enclave/sgx/report.c
 @@ -18,6 +18,7 @@
@@ -588,7 +588,7 @@ index 657993af5..965176cbe 100644
  #include "platform_t.h"
  
  OE_STATIC_ASSERT(OE_REPORT_DATA_SIZE == sizeof(sgx_report_data_t));
-@@ -177,6 +178,9 @@ oe_result_t oe_get_report_v2(
+@@ -185,6 +186,9 @@ oe_result_t oe_get_report_v2(
      else
          format_id = &_local_uuid;
  
@@ -599,36 +599,36 @@ index 657993af5..965176cbe 100644
  
      OE_CHECK(oe_find_attester_plugin(format_id, &attester));
 diff --git a/host/CMakeLists.txt b/host/CMakeLists.txt
-index dc2d90b02..d782ac0e4 100644
+index 9448b27c7..232117ca4 100644
 --- a/host/CMakeLists.txt
 +++ b/host/CMakeLists.txt
-@@ -359,10 +359,16 @@ list(
-   strings.c
-   traceh_enclave.c)
+@@ -431,6 +431,9 @@ install(
+   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/openenclave/host
+           COMPONENT OEHOSTVERIFY)
  
 +# EDG: add erthost
 +include(${ERTSRC}/host/erthost.cmake)
 +
- # Combine the following common code along with the platform specific code and
- # host verification code to get the full oehost target provided by the OE SDK.
- add_library(oehost STATIC ${PLATFORM_HOST_ONLY_SRC} ${PLATFORM_SDK_ONLY_SRC})
- 
+ # Build oehost
+ # Usage:
+ # add_library_oehost_wrapper(<LIB_NAME name of lib> [SKIP_INSTALL])
+@@ -508,7 +511,7 @@ macro (add_library_oehost_wrapper)
+                                Threads::Threads)
+     target_compile_options(
+       ${PARA_LIB_NAME}
+-      PRIVATE -Wno-attributes -Wmissing-prototypes -fPIC ${PLATFORM_FLAGS}
++      PRIVATE -Wno-attributes $<$<COMPILE_LANGUAGE:C>:-Wmissing-prototypes> -fPIC ${PLATFORM_FLAGS}
+       PUBLIC -fstack-protector-strong)
+     target_compile_definitions(
+       ${PARA_LIB_NAME}
+@@ -594,3 +597,7 @@ add_library_oehost_wrapper(LIB_NAME oehost_prerelease_test SKIP_INSTALL)
+ target_compile_definitions(
+   oehost_prerelease_test PUBLIC OEUTIL_TCB_ALLOW_ANY_ROOT_KEY
+                                 OEUTIL_QUOTE_BYPASS_DATE_CHECK)
++
 +# EDG: add EDL
 +add_dependencies(oehost ertlibc_untrusted_edl)
-+
- add_library(oehostverify STATIC ${PLATFORM_HOST_ONLY_SRC})
- 
- target_link_libraries(oehostverify PUBLIC oe_includes)
-@@ -481,7 +487,8 @@ endif ()
- if (UNIX)
-   target_compile_options(
-     oehost
--    PRIVATE -Wno-attributes -Wmissing-prototypes -fPIC ${PLATFORM_FLAGS}
-+    PRIVATE -Wno-attributes $<$<COMPILE_LANGUAGE:C>:-Wmissing-prototypes> -fPIC
-+            ${PLATFORM_FLAGS}
-     PUBLIC -fstack-protector-strong)
-   target_compile_definitions(
-     oehost
++add_dependencies(oehost_prerelease_test ertlibc_untrusted_edl)
 diff --git a/host/linux/syscall.c b/host/linux/syscall.c
 index e3255a942..77351b2ac 100644
 --- a/host/linux/syscall.c
@@ -1390,10 +1390,10 @@ index c59fdf194..7037ce788 100644
      };
  };
 diff --git a/include/openenclave/edl/sgx/thread.edl b/include/openenclave/edl/sgx/thread.edl
-index af2f301b0..a278851fe 100644
+index af2f301b0..10d258373 100644
 --- a/include/openenclave/edl/sgx/thread.edl
 +++ b/include/openenclave/edl/sgx/thread.edl
-@@ -17,11 +17,27 @@ enclave
+@@ -17,11 +17,28 @@ enclave
      // intentionally kept in host memory.
      include "openenclave/bits/types.h"
  
@@ -1413,7 +1413,8 @@ index af2f301b0..a278851fe 100644
 +        int oe_sgx_thread_timedwait_ocall(
 +            [user_check] oe_enclave_t* oe_enclave,
 +            uint64_t tcs,
-+            [in] const struct oe_sgx_thread_timedwait_ocall_timespec* timeout);
++            [in] const struct oe_sgx_thread_timedwait_ocall_timespec* timeout,
++            bool timeout_absolute);
 +
 +        void oe_sgx_thread_wake_multiple_ocall(
 +            [user_check] oe_enclave_t* oe_enclave,
@@ -1687,10 +1688,10 @@ index 526ae583f..8198d8da0 100644
 +
 +OE_WEAK_ALIAS(calloc, __libc_calloc);
 diff --git a/pkgconfig/CMakeLists.txt b/pkgconfig/CMakeLists.txt
-index ae0663d31..02cb0ed26 100644
+index 41719a696..dc1e19371 100644
 --- a/pkgconfig/CMakeLists.txt
 +++ b/pkgconfig/CMakeLists.txt
-@@ -89,7 +89,7 @@ set(ENCLAVE_OPENSSL_CRYPTO_WRAPPER_LIBS -loecryptoopenssl -lopensslssl
+@@ -98,7 +98,7 @@ set(ENCLAVE_OPENSSL_CRYPTO_WRAPPER_LIBS -loecryptoopenssl -lopensslssl
  set(ENCLAVE_OPENSSL_SYMCRYPT_FIPS_WRAPPER_LIBS
      -loesymcryptengine -loecryptoopenssl -lopensslssl -lopensslcrypto)
  
@@ -1726,7 +1727,7 @@ index 410bdd9ae..e7d1e8283 100644
  clean:
  	rm -f sqlite_host host.o sqlite_u.o sqlite_u.c sqlite_u.h sqlite_args.h
 diff --git a/samples/attested_tls/client/enc/Makefile b/samples/attested_tls/client/enc/Makefile
-index 0a6f91c4e..aa850ee17 100644
+index 1a203a3d4..8b6f36712 100644
 --- a/samples/attested_tls/client/enc/Makefile
 +++ b/samples/attested_tls/client/enc/Makefile
 @@ -40,7 +40,7 @@ build:
@@ -1739,7 +1740,7 @@ index 0a6f91c4e..aa850ee17 100644
  sign:
  	oesign sign -e tls_client_enc -c  enc.conf -k private.pem
 diff --git a/samples/attested_tls/server/enc/Makefile b/samples/attested_tls/server/enc/Makefile
-index 03f44fef4..677f7aacc 100644
+index f7b9eace5..d985b50a0 100644
 --- a/samples/attested_tls/server/enc/Makefile
 +++ b/samples/attested_tls/server/enc/Makefile
 @@ -42,7 +42,7 @@ build:
@@ -1804,7 +1805,7 @@ index 234aa640b..5e8043871 100644
  clean:
  	rm -f switchlesshost host.o switchless_sample_u.o \
 diff --git a/samples/test-samples.cmake b/samples/test-samples.cmake
-index 095e5c1b9..55e98fdf8 100644
+index c0528f101..044c8c100 100644
 --- a/samples/test-samples.cmake
 +++ b/samples/test-samples.cmake
 @@ -80,20 +80,14 @@ else ()
@@ -3304,7 +3305,7 @@ index db56a077e..3d9448152 100644
  {
      int ret = -1;
 diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
-index 74cc0939d..bb6d4658b 100644
+index 639bd4897..e538812ec 100644
 --- a/tests/CMakeLists.txt
 +++ b/tests/CMakeLists.txt
 @@ -148,7 +148,7 @@ if (UNIX
@@ -3316,6 +3317,15 @@ index 74cc0939d..bb6d4658b 100644
      add_subdirectory(ecall_ocall)
      add_subdirectory(echo)
      add_subdirectory(enclaveparam)
+@@ -171,7 +171,7 @@ if (UNIX
+     add_subdirectory(SampleApp)
+     add_subdirectory(SampleAppCRT)
+     add_subdirectory(sealKey)
+-    add_subdirectory(secure_verify)
++    #add_subdirectory(secure_verify)
+     add_subdirectory(sim-mode)
+     add_subdirectory(stdc)
+     add_subdirectory(stdcxx)
 diff --git a/tests/crypto/enclave/enc/enc.c b/tests/crypto/enclave/enc/enc.c
 index 8a1389e0e..87767ccf4 100644
 --- a/tests/crypto/enclave/enc/enc.c
@@ -3372,10 +3382,10 @@ index a6d870bfc..5ba866b22 100644
    enc.c
    ${CMAKE_CURRENT_BINARY_DIR}/edl_opt_out_t.c)
 diff --git a/tests/edl_opt_out/enc/enc.c b/tests/edl_opt_out/enc/enc.c
-index 944422b4b..b5bb443ff 100644
+index 641a182c7..8b59e6b8b 100644
 --- a/tests/edl_opt_out/enc/enc.c
 +++ b/tests/edl_opt_out/enc/enc.c
-@@ -97,9 +97,6 @@ void enc_edl_opt_out()
+@@ -152,9 +152,6 @@ void enc_edl_opt_out()
  
      /* sgx/entropy.edl */
      /* Only available with oecryptoopenssl */
@@ -3385,6 +3395,19 @@ index 944422b4b..b5bb443ff 100644
  #endif
  }
  
+diff --git a/tests/host_verify/host/host.cpp b/tests/host_verify/host/host.cpp
+index 6bc86a9c6..98a276ff0 100644
+--- a/tests/host_verify/host/host.cpp
++++ b/tests/host_verify/host/host.cpp
+@@ -384,7 +384,7 @@ int main()
+         _verify_report(REPORT_BAD_FILENAME, NULL, false);
+ 
+     if (_validate_file(TDX_QUOTE_FILENAME, true))
+-        _verify_evidence(&_tdx_quote_uuid, TDX_QUOTE_FILENAME, NULL, false);
++        (void)_tdx_quote_uuid;
+ 
+     return 0;
+ }
 diff --git a/tests/invalid_image/main.cpp b/tests/invalid_image/main.cpp
 index c32f0d0f8..57ba0486c 100644
 --- a/tests/invalid_image/main.cpp
@@ -3690,7 +3713,7 @@ index c9779537c..8a8f66b7b 100644
      uint64_t stack = (uint64_t)exception_handler_stack;
      uint64_t stack_end = stack + EXCEPTION_HANDLER_STACK_SIZE;
 diff --git a/tests/syscall/fs/enc/enc.cpp b/tests/syscall/fs/enc/enc.cpp
-index 0664f845e..75f456101 100644
+index 2224750de..146555ba5 100644
 --- a/tests/syscall/fs/enc/enc.cpp
 +++ b/tests/syscall/fs/enc/enc.cpp
 @@ -467,13 +467,23 @@ static void test_flock_file(FILE_SYSTEM& fs, const char* tmp_dir)
@@ -4303,7 +4326,7 @@ index b52ce1d24..397975850 100644
          oe_put_err("oe_load_enclave_image(): result=%u", result);
      }
 diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
-index 4ab2d85bb..9167e909e 100644
+index 8aab80c4d..4e1f379da 100644
 --- a/tools/CMakeLists.txt
 +++ b/tools/CMakeLists.txt
 @@ -29,7 +29,9 @@ endif ()

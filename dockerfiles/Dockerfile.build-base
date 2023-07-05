@@ -1,0 +1,10 @@
+FROM ubuntu:jammy-20230605
+RUN apt-get update && apt-get install -dy --no-install-recommends \
+  build-essential \
+  ca-certificates \
+  clang-11 \
+  cmake \
+  git \
+  libssl-dev \
+  ninja-build \
+  wget

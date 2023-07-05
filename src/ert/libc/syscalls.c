@@ -11,6 +11,7 @@
 #include <openenclave/internal/trace.h>
 #include <stdlib.h>
 #include <sys/random.h>
+#include <sys/socket.h>
 #include <time.h>
 #include "../../ertlibc/syscall.h"
 #include "ertfutex.h"
@@ -25,7 +26,8 @@ long __syscall(long n, long x1, long x2, long x3, long x4, long x5, long x6)
     switch (n)
     {
         case OE_SYS_futex:
-            return ert_futex((int*)x1, x2, x3, (struct timespec*)x4, (int*)x5);
+            return ert_futex(
+                (int*)x1, x2, x3, (struct timespec*)x4, (int*)x5, x6);
         case OE_SYS_set_thread_area:
             // Called by __init_tp (see pthread.c). Can be a noop as TLS is
             // handled by OE.
@@ -73,6 +75,7 @@ long __syscall(long n, long x1, long x2, long x3, long x4, long x5, long x6)
         return ret;
 
     // Try liboesyscall
+    const long org_n = n;
     switch (n)
     {
         case OE_SYS_lstat:
@@ -83,8 +86,7 @@ long __syscall(long n, long x1, long x2, long x3, long x4, long x5, long x6)
                 x4 = 0;
             break;
         case OE_SYS_accept4:
-            if (!x4)
-                n = OE_SYS_accept;
+            n = OE_SYS_accept;
             break;
         case OE_SYS_getrandom:
             // clear flags because oe_getrandom fails if any are set and it
@@ -96,18 +98,30 @@ long __syscall(long n, long x1, long x2, long x3, long x4, long x5, long x6)
     ret = oe_syscall(n, x1, x2, x3, x4, x5, x6);
     // oe_syscall returns result and errno like libc syscall(), but musl expects
     // them like raw syscall, so we must adjust the values.
-    if (ret >= 0)
-        return ret;
     if (ret == -1 && errno > 0)
     {
         if (errno == ENOSYS)
             OE_TRACE_WARNING("unhandled syscall: n=%lu", n);
         return -errno;
     }
+    if (ret < 0)
+    {
+        OE_TRACE_FATAL(
+            "unexpected oe_syscall result: n=%lu ret=%ld errno=%d",
+            n,
+            ret,
+            errno);
+        abort();
+    }
 
-    OE_TRACE_FATAL(
-        "unexpected oe_syscall result: n=%lu ret=%ld errno=%d", n, ret, errno);
-    abort();
+    switch (org_n)
+    {
+        case OE_SYS_accept4:
+            if (x4 & SOCK_NONBLOCK)
+                oe_syscall(OE_SYS_fcntl, ret, F_SETFL, O_NONBLOCK);
+            break;
+    }
+    return ret;
 }
 
 long __syscall_cp(long n, long x1, long x2, long x3, long x4, long x5, long x6)
